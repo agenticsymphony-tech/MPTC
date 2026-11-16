@@ -235,7 +235,7 @@ All numbers are normalized to a 48 MHz Cortex-M0+ software emulation. The benchm
 ### Option A: CMake (PC benchmark + tests)
 
 ```bash
-git clone <your-repo> mptc
+git clone https://github.com/kostyk348/MPTC mptc
 cd mptc
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
