@@ -282,6 +282,17 @@ The ESP32 demo runs each module on a synthetic signal and prints timing / energy
 
 ---
 
+## Contributing
+
+- **[Good first issues](https://github.com/kostyk348/MPTC/labels/good%20first%20issue)** — scoped tasks with the acceptance
+  criteria written down, sized for one sitting.
+- **[Discussions](https://github.com/kostyk348/MPTC/discussions)** — questions, ideas and "how do I…"; issues are for bugs.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to build, test and submit a change.
+- **[SECURITY.md](SECURITY.md)** — private reporting for vulnerabilities (never a public issue).
+
+Pull requests are reviewed against one rule: the description must say **what problem** it solves and
+**how it was verified** — a CI link or a pasted command output.
+
 ## License
 
 Apache 2.0 — see `LICENSE`. Suitable for both proprietary and open-source use.
