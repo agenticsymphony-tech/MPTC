@@ -215,19 +215,41 @@ Full API documentation: see header comments and `docs/` after running Doxygen.
 
 ## Benchmarks
 
-Run `cmake --build build && ./build/pc_benchmark` on the host PC. Below are representative numbers (YMMV by compiler and flags):
+Benchmarks are measured, not estimated: `examples/pc/pc_benchmark.c` runs each routine against a
+naive C baseline on the host CPU, three rounds per test, and reports the **best** round (the
+scheduler and turbo-boost otherwise add 2-5x noise on sub-microsecond operations). The timer is
+`QueryPerformanceCounter` on Windows and `clock_gettime(CLOCK_MONOTONIC)` elsewhere.
 
-| Test | Naive (cycles) | MPTC (cycles) | Speedup | Notes |
+```
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/pc_benchmark
+```
+
+Measured run — **Intel Core i3-1115G4 @ 3.00 GHz, GCC 16.1.0, `-O2`** (`µs` per operation,
+Sauvola — per 128×128 image):
+
+| Test | Naive | MPTC | Speedup | What it actually shows |
 |---|---|---|---|---|
-| Conditional select x 1M | 3.2 M | 0.6 M | **5.3×** | Cortex-M0+, no FPU |
-| sin() via libm x 100k | 2.4 M | 0.18 M | **13.3×** | Taylor 4-term vs libm |
-| tanh() via libm x 100k | 3.1 M | 0.22 M | **14.1×** | Rational approx vs libm |
-| 64-bin FFT block x 1k | 1.8 M | 0.42 M | **4.3×** | SDFT per-tick vs radix-2 |
-| 3x3 median filter (320x240) | 2.6 M | 1.1 M | **2.4×** | Bitonic vs naive sort |
-| Sauvola binarize (320x240) | 540 M | 4.2 M | **128×** | Integral img vs sliding window |
+| `sint_q15_select` ×100k | 0.00037 | 0.00076 | **0.48×** | branchless loses on x86 (cmov vs. a predictable branch) |
+| `mptc_clamp_q15` ×100k | 0.00060 | 0.00065 | **0.93×** | parity — min/max, no branch penalty to remove |
+| `sin` (4-term Taylor vs libm) | 0.00519 | 0.00596 | **0.87×** | libm is vectorised; gains appear only without an FPU |
+| `tanh` (rational vs libm `tanhf`) | 0.00928 | 0.00244 | **3.80×** | no `expf` in the loop |
+| `GELU` (branchless vs tanh+libm) | 0.01191 | 0.00205 | **5.82×** | same, plus no branch |
+| median of 9 (bitonic vs insertion) | 0.01709 | 0.00081 | **21.05×** | algorithmic: sorting network vs insertion sort |
+| SDFT vs block DFT (64 bins) | 1.08095 | 0.12434 | **8.69×** | algorithmic: O(N) per tick vs O(N²) recompute |
+| Sauvola 128×128 (integral image vs sliding window) | 595.1 | 338.4 | **1.76×** | algorithmic: O(1) window sums vs O(W²) |
+| Triple-PLL (3× IIR + median) | 0.00101 | 0.00380 | **0.27×** | deliberately slower: outlier rejection costs work |
+| `ternary_dot8` (vs float dot) | 0.00176 | 0.00020 | **8.97×** | ternary weights need no multiplication |
 
-All numbers are normalized to a 48 MHz Cortex-M0+ software emulation. The benchmark in `examples/pc/` produces a similar table on your host machine.
+Average speedup on this host: **5.3×** (best 21×).
 
+**Honest reading.** On an x86 desktop half of these tests are at parity or slower — branch
+predictors make `if` cheap and libm is vectorised. The wins that matter are (a) *algorithmic* —
+SDFT, integral-image Sauvola, sorting-network median, ternary dot; and (b) *FPU-less targets*,
+which this harness cannot measure: on a 48 MHz Cortex-M0+ there is no `cmov`, no libm vector
+path and no hardware float, so the fixed-point code wins well beyond the numbers above. Numbers
+for MCU targets need a QEMU/oscilloscope run and are not claimed here.
 ---
 
 ## Building & integrating

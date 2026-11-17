@@ -11,7 +11,12 @@
  *   cmake --build build
  *   ./build/pc_benchmark
  */
+#if defined(_WIN32)
+#define _CRT_SECURE_NO_WARNINGS
+#include <windows.h>
+#else
 #define _POSIX_C_SOURCE 199309L
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,15 +25,32 @@
 
 #include "mptc/mptc.h"
 
-#define BENCH_ITER 100000
+#define BENCH_ITER  100000
+/* Каждый тест прогоняется BENCH_ROUNDS раз, берётся минимум: на десктопе разброс от
+ * планировщика ОС и турбо-буста легко даёт 2-5x на быстрых операциях. */
+#define BENCH_ROUNDS 3
 
 /* ------------------------------------------------------------------ */
 /*  Timing helper                                                      */
 /* ------------------------------------------------------------------ */
 static double now_seconds(void) {
+#if defined(_WIN32)
+    /* clock_gettime в MinGW опирается на системные часы с разрешением ~1 мс;
+       QueryPerformanceCounter даёт счётчик с разрешением долей микросекунды. */
+    static LARGE_INTEGER freq;
+    static int have_freq = 0;
+    LARGE_INTEGER counter;
+    if (!have_freq) {
+        QueryPerformanceFrequency(&freq);
+        have_freq = 1;
+    }
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart / (double)freq.QuadPart;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -81,7 +103,7 @@ static void print_results(const char *title, bench_result_t *results, int n) {
            "Test", "MPTC (us)", "Naive (us)", "Speedup", "Notes");
     printf("-----------------------------------------------------------------------------\n");
     for (int i = 0; i < n; ++i) {
-        printf("%-32s %12.2f %12.2f %9.2fx   %s\n",
+        printf("%-32s %12.5f %12.5f %9.2fx   %s\n",
                results[i].name,
                results[i].mptc_us,
                results[i].naive_us,
@@ -113,7 +135,7 @@ static void bench_select(bench_result_t *r) {
     r->naive_us = (t1 - t0) * 1e6 / BENCH_ITER;
 
     r->speedup = r->naive_us / r->mptc_us;
-    r->name = "sint_q15_select (1M iters)";
+    r->name = "sint_q15_select (100k iters)";
     r->notes = "branchless vs if";
     (void)sink;
 }
@@ -341,8 +363,7 @@ static void bench_sauvola(bench_result_t *r) {
     r->mptc_us = (t1 - t0) * 1e6;
 
     /* Naive: full window sum at every pixel. */
-    static uint8_t out2[W * H];
-    (void)out2;  /* written but not read — used only for fair timing comparison */
+    static volatile uint8_t out2[W * H];  /* written but not read — used only for fair timing comparison */
     t0 = now_seconds();
     for (int y = 8; y < H - 8; ++y) {
         for (int x = 8; x < W - 8; ++x) {
@@ -452,6 +473,27 @@ static void bench_ternary_dot(bench_result_t *r) {
     (void)sink; (void)fsink;
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  Rounds wrapper: минимум из BENCH_ROUNDS прогонов                   */
+/* ------------------------------------------------------------------ */
+typedef void (*bench_fn_t)(bench_result_t *);
+
+static void run_rounds(bench_fn_t fn, bench_result_t *out) {
+    bench_result_t tmp;
+    double best_mptc = 1e300, best_naive = 1e300;
+    for (int r = 0; r < BENCH_ROUNDS; ++r) {
+        memset(&tmp, 0, sizeof tmp);
+        fn(&tmp);
+        if (tmp.mptc_us  < best_mptc)  best_mptc  = tmp.mptc_us;
+        if (tmp.naive_us < best_naive) best_naive = tmp.naive_us;
+    }
+    *out = tmp;
+    out->mptc_us  = best_mptc;
+    out->naive_us = best_naive;
+    out->speedup  = (best_mptc > 0.0 && best_naive > 0.0) ? best_naive / best_mptc : 0.0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main                                                               */
 /* ------------------------------------------------------------------ */
@@ -483,16 +525,16 @@ int main(void) {
     bench_result_t results[16];
     int n = 0;
 
-    bench_select            (&results[n++]);
-    bench_clamp             (&results[n++]);
-    bench_sin               (&results[n++]);
-    bench_tanh              (&results[n++]);
-    bench_gelu              (&results[n++]);
-    bench_median9           (&results[n++]);
-    bench_sdft              (&results[n++]);
-    bench_sauvola           (&results[n++]);
-    bench_triple_pll        (&results[n++]);
-    bench_ternary_dot       (&results[n++]);
+    run_rounds(bench_select, &results[n++]);
+    run_rounds(bench_clamp, &results[n++]);
+    run_rounds(bench_sin, &results[n++]);
+    run_rounds(bench_tanh, &results[n++]);
+    run_rounds(bench_gelu, &results[n++]);
+    run_rounds(bench_median9, &results[n++]);
+    run_rounds(bench_sdft, &results[n++]);
+    run_rounds(bench_sauvola, &results[n++]);
+    run_rounds(bench_triple_pll, &results[n++]);
+    run_rounds(bench_ternary_dot, &results[n++]);
 
     print_results("MPTC vs Naive Baselines", results, n);
 
